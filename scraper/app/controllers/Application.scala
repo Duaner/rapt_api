@@ -81,7 +81,7 @@ class Application extends Controller {
   def findDate(doc: Document, where: Regex): Option[Schedule] = {
     import scala.collection.JavaConversions._
     doc.select(".bg2").toSeq.find { el =>
-      where.findFirstIn(el.children.first.text).isDefined
+      Option(el.children.first).map(_.text).flatMap(where.findFirstIn).isDefined
     }.flatMap { el =>
       el.children().toSeq.lift(1).map(_.text).flatMap {
         case rxSchedule(hours, minutes) => Some(Schedule(hours.toInt, minutes.toInt))
