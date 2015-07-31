@@ -205,6 +205,15 @@ class Application extends Controller {
     def empty = ParsingCorrespondance()
   }
 
+  sealed trait ParsingResult { def value: json.JsValue }
+  case class ParsingOk(value: json.JsValue) extends ParsingResult
+  case class ParsingError(msg: Option[String]) extends ParsingResult {
+    def value = Json.obj("error" -> (msg.getOrElse("error occured during parsing"): String))
+  }
+  case object ParsingInvalid extends ParsingResult {
+    val value = Json.obj("error" -> "Can't find infos")
+  }
+
   case class ParsingState(
     startedAt: Option[LocalTime] = None,
     finishedAt: Option[LocalTime] = None,
@@ -241,61 +250,68 @@ class Application extends Controller {
       }
     }
 
-    def format: Option[json.JsValue] = {
-      for {
-        _startedAt <- this.startedAt
-        _finishedAt <- this.finishedAt
-      } yield {
-        val totalDuration = _finishedAt - _startedAt
-        Json.obj(
-          "itineraire" -> Json.obj(
-            "nb_correspondances" -> correspondances.size,
-            "duree_total" -> totalDuration,
-            "duree_marche_avant_premiere_station" -> firstWalkDuration,
-            "correspondances" -> json.JsArray(correspondances.reverse.map { c =>
-              Json.obj(
-                "heure_depart" -> c.startAt,
-                "station_depart" -> c.from,
-                "station_arrivée" -> c.to,
-                "ligne" -> c.line
-              )
-            })
-          )
+    def isDefined = {
+      startedAt.isDefined &&
+      finishedAt.isDefined &&
+      firstWalkDuration.isDefined &&
+      ! correspondances.isEmpty
+    }
+
+    def toResult: ParsingResult = {
+      if (isDefined) ParsingOk(Json.obj(
+        "itineraire" -> Json.obj(
+          "nb_correspondances" -> correspondances.size,
+          "duree_total" -> finishedAt.flatMap { f => startedAt.map { s => f - s } },
+          "duree_marche_avant_premiere_station" -> firstWalkDuration,
+          "correspondances" -> json.JsArray(correspondances.reverse.map { c =>
+            Json.obj(
+              "heure_depart" -> c.startAt,
+              "station_depart" -> c.from,
+              "station_arrivée" -> c.to,
+              "ligne" -> c.line
+            )
+          })
         )
-      }
+      ))
+      else ParsingInvalid
     }
   }
+
   object ParsingState {
     def empty: ParsingState = ParsingState()
   }
 
-  def parseDocument(doc: Document): ParsingState = {
+  def parseDocument(doc: Document): ParsingResult = {
     import scala.collection.JavaConversions._
-    doc.select(".bg1,.bg2,.bg3").toSeq.foldLeft(ParsingState.empty) {
-      case (s, _) if s.isFinished => s
-      case (s, selectorStart(date)) => println(s"start = $date"); s.started(date)
-      case (s, selectorFinish(date)) => println(s"finish = $date"); s.finished(date)
-      case (s, selectorWalk(station)) => println(s"walk = $station"); s.addWalk(station)
-      case (s, selectorDuration1(duration)) => println(s"duration1 = $duration"); s.addDuration1(duration)
-      case (s, selectorDirection(direction)) => println(s"direction = $direction"); s.addDirection(direction)
-      case (s, selectorFrom((station, date, line))) => println(s"de = $station at $date on $line"); s.addFrom(station, date, line)
-      case (s, selectorTo((station, date))) => println(s"à = $station at $date"); s.addTo(station, date)
-      case (s, selectorDuration3(duration)) => println(s"duration3 = $duration"); s  // osef
-      case (s, selectorCorrespondance(correspondance)) => println(s"correspondance = $correspondance"); s  // osef
-      case (s, e) => println(s"unknwon = $e"); s
+    Option(doc.select(".error").first) match {
+      case Some(e) => ParsingError(e.textNodes.toSeq.lift(0).map(_.text))
+      case _ =>
+        doc.select(".bg1,.bg2,.bg3").toSeq.foldLeft(ParsingState.empty) {
+          case (s, _) if s.isFinished => s
+          case (s, selectorStart(date)) => println(s"start = $date"); s.started(date)
+          case (s, selectorFinish(date)) => println(s"finish = $date"); s.finished(date)
+          case (s, selectorWalk(station)) => println(s"walk = $station"); s.addWalk(station)
+          case (s, selectorDuration1(duration)) => println(s"duration1 = $duration"); s.addDuration1(duration)
+          case (s, selectorDirection(direction)) => println(s"direction = $direction"); s.addDirection(direction)
+          case (s, selectorFrom((station, date, line))) => println(s"de = $station at $date on $line"); s.addFrom(station, date, line)
+          case (s, selectorTo((station, date))) => println(s"à = $station at $date"); s.addTo(station, date)
+          case (s, selectorDuration3(duration)) => println(s"duration3 = $duration"); s  // osef
+          case (s, selectorCorrespondance(correspondance)) => println(s"correspondance = $correspondance"); s  // osef
+          case (s, e) => println(s"unknwon = $e"); s
+        }.toResult
     }
   }
 
-  def parse(body: HTMLBody, url: String): Option[json.JsValue] = {
+  def parse(body: HTMLBody, url: String): ParsingResult = {
     val doc: Document = Parser.parse(body, url)
-    parseDocument(doc).format
+    parseDocument(doc)
   }
 
   def callAndParse(query: Query): Future[Result] = {
     call(query).map { body =>
       parse(body, query.url) match {
-        case Some(js) => Ok(js)
-        case None => NotFound(Json.obj("error" -> "Can't find infos"))
+        case ParsingOk(value) => Ok(value)
+        case err => InternalServerError(err.value)
       }
     }
   }
