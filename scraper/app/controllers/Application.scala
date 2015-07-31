@@ -309,10 +309,13 @@ class Application extends Controller {
 
   def callAndParse(query: Query): Future[Result] = {
     call(query).map { body =>
-      parse(body, query.url) match {
+      (parse(body, query.url) match {
         case ParsingOk(value) => Ok(value)
         case err => InternalServerError(err.value)
-      }
+      }).withHeaders(
+        "Content-Type" -> "text/json",
+        "Access-Control-Allow-Origin" -> "*"
+      )
     }
   }
 
