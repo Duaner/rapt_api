@@ -99,7 +99,7 @@ class Application extends Controller {
       .filter { _.classNames.contains("bg2") }
       .filter { e => Option(e.children.first).map(_.text).flatMap(rx.findFirstIn).isDefined }
       .flatMap { e =>
-        e.children().toSeq.lift(1).map(_.text).flatMap {
+        e.children.toSeq.lift(1).map(_.text).flatMap {
           case rxSchedule(hours, minutes) => Some(LocalTime.of(hours.toInt, minutes.toInt))
           case _ => None
         }
@@ -124,7 +124,7 @@ class Application extends Controller {
     Option(el)
       .filter { _.classNames.contains(klass) }
       .flatMap { e =>
-        e.children().toSeq.lift(1).map(_.text).flatMap {
+        e.children.toSeq.lift(1).map(_.text).flatMap {
           case rxSelectorDuration(minutes) => Some(LocalTime.of(0, minutes.toInt))
           case _ => None
         }
@@ -142,24 +142,45 @@ class Application extends Controller {
       .flatMap { _.textNodes.toSeq.lift(0).map(_.text) }
   }
 
-  def selectorFromTo(rx: Regex) = Selector[(String, LocalTime)] { el =>
+  val rxSelectorFromFilter = """de""".r
+  val rxSelectorFromParserLine = """\[(.*)\]""".r
+  val selectorFrom = Selector[(String, LocalTime, String)] { el =>
     import scala.collection.JavaConversions._
     Option(el)
       .filter { _.classNames.contains("bg3") }
-      .filter { _.children.toSeq.lift(1).map(_.text).flatMap(rx.findFirstIn).isDefined }
+      .filter { _.children.toSeq.lift(1).map(_.text).flatMap(rxSelectorFromFilter.findFirstIn).isDefined }
+      .flatMap { e =>
+        val children = e.children.toSeq
+        for {
+          station <- e.textNodes.toSeq.lift(0).map(_.text)
+          date <- children.lift(2).map(_.text).flatMap {
+            case rxSchedule(hours, minutes) => Some(LocalTime.of(hours.toInt, minutes.toInt))
+            case _ => None
+          }
+          line <- children.lift(0).map(_.attr("alt")).flatMap {
+            case rxSelectorFromParserLine(line) => Some(line)
+            case _ => None
+          }
+        } yield (station, date, line)
+      }
+  }
+
+  val rxSelectorTo = """à""".r
+  val selectorTo = Selector[(String, LocalTime)] { el =>
+    import scala.collection.JavaConversions._
+    Option(el)
+      .filter { _.classNames.contains("bg3") }
+      .filter { _.children.toSeq.lift(1).map(_.text).flatMap(rxSelectorTo.findFirstIn).isDefined }
       .flatMap { e =>
         for {
           station <- e.textNodes.toSeq.lift(0).map(_.text)
-          date <- e.children().toSeq.lift(2).map(_.text).flatMap {
+          date <- e.children.toSeq.lift(2).map(_.text).flatMap {
             case rxSchedule(hours, minutes) => Some(LocalTime.of(hours.toInt, minutes.toInt))
             case _ => None
           }
         } yield (station, date)
       }
   }
-
-  val selectorFrom = selectorFromTo("""de""".r)
-  val selectorTo = selectorFromTo("""à""".r)
 
   val rxSelectorCorrespondance = """Correspondance à""".r
   val selectorCorrespondance = Selector[String] { el =>
@@ -177,7 +198,7 @@ class Application extends Controller {
     finishAt: Option[LocalTime] = None,
     line: Option[String] = None
   ) {
-    def addFrom(station: String, date: LocalTime) = copy(from = Some(station), startAt = Some(date))
+    def addFrom(station: String, date: LocalTime, line: String) = copy(from = Some(station), startAt = Some(date), line = Some(line))
     def addTo(station: String, date: LocalTime) = copy(to = Some(station), finishAt = Some(date))
   }
   object ParsingCorrespondance {
@@ -203,9 +224,9 @@ class Application extends Controller {
       else this
     }
     def addDirection(direction: String) = copy(correspondances = ParsingCorrespondance.empty :: correspondances)
-    def addFrom(station: String, date: LocalTime) = {
+    def addFrom(station: String, date: LocalTime, line: String) = {
       correspondances match {
-        case c :: cs => copy(correspondances = c.addFrom(station, date) :: cs)
+        case c :: cs => copy(correspondances = c.addFrom(station, date, line) :: cs)
         case _ =>
           Logger.warn(s"Trying to add a From without having added Direction")
           this
@@ -257,7 +278,7 @@ class Application extends Controller {
       case (s, selectorWalk(station)) => println(s"walk = $station"); s.addWalk(station)
       case (s, selectorDuration1(duration)) => println(s"duration1 = $duration"); s.addDuration1(duration)
       case (s, selectorDirection(direction)) => println(s"direction = $direction"); s.addDirection(direction)
-      case (s, selectorFrom((station, date))) => println(s"de = $station at $date"); s.addFrom(station, date)
+      case (s, selectorFrom((station, date, line))) => println(s"de = $station at $date on $line"); s.addFrom(station, date, line)
       case (s, selectorTo((station, date))) => println(s"à = $station at $date"); s.addTo(station, date)
       case (s, selectorDuration3(duration)) => println(s"duration3 = $duration"); s  // osef
       case (s, selectorCorrespondance(correspondance)) => println(s"correspondance = $correspondance"); s  // osef
