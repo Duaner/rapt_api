@@ -251,7 +251,7 @@ object Scraper {
     ws.WS
      .url(query.url)
      .withQueryString(query.toQueryString: _*)
-     .withHeaders("User-Agent" -> "super-user")
+     .withHeaders("User-Agent" -> "Chrome")
      .get()
      .flatMap {
        case resp if resp.status == 200 => Future.successful(resp.body: HTMLBody)

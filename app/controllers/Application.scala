@@ -4,7 +4,7 @@ import java.time.LocalTime
 import play.api.Play.current
 import play.api._
 import play.api.data.Form
-import play.api.data.Forms.{ mapping, nonEmptyText, boolean, number }
+import play.api.data.Forms.{ mapping, nonEmptyText, boolean, number, optional }
 import play.api.libs.json
 import play.api.libs.json.Json
 import play.api.mvc._
@@ -27,11 +27,11 @@ class Application extends Controller {
     name1: String,
     type2: String,
     name2: String,
-    reseau: String,
-    traveltype: String,
-    datestart: Boolean,
-    datehour: Int,
-    dateminute: Int
+    reseau: Option[String],
+    traveltype: Option[String],
+    datestart: Option[Boolean],
+    datehour: Option[Int],
+    dateminute: Option[Int]
   ) extends Scraper.Query {
     def url = ItineraryQuery.url
     def resolve: Future[Either[json.JsValue, ItineraryQuery]] = {
@@ -52,17 +52,17 @@ class Application extends Controller {
         }
       }
     }
-    def toQueryString = Seq[(String, String)](
-      "type1" -> type1,
-      "name1" -> name1,
-      "type2" -> type2,
-      "name2" -> name2,
+    def toQueryString = Seq[(String, Option[String])](
+      "type1" -> Some(type1),
+      "name1" -> Some(name1),
+      "type2" -> Some(type2),
+      "name2" -> Some(name2),
       "reseau" -> reseau,
       "traveltype" -> traveltype,
-      "datestart" -> datestart.toString,
-      "datehour" -> datehour.toString,
-      "dateminute" -> dateminute.toString
-    )
+      "datestart" -> datestart.map(_.toString),
+      "datehour" -> datehour.map(_.toString),
+      "dateminute" -> dateminute.map(_.toString)
+    ).collect { case (k, Some(v)) => (k, v) }
   }
   object ItineraryQuery {
     val url = "http://wap.ratp.fr/siv/itinerary-list"
@@ -73,11 +73,11 @@ class Application extends Controller {
     "name1" -> nonEmptyText,
     "type2" -> nonEmptyText,
     "name2" -> nonEmptyText,
-    "reseau" -> nonEmptyText,
-    "traveltype" -> nonEmptyText,
-    "datestart" -> boolean,
-    "datehour" -> number(min=0, max=23),
-    "dateminute" -> number(min=0, max=59)
+    "reseau" -> optional(nonEmptyText),
+    "traveltype" -> optional(nonEmptyText),
+    "datestart" -> optional(boolean),
+    "datehour" -> optional(number(min=0, max=23)),
+    "dateminute" -> optional(number(min=0, max=59))
   )(ItineraryQuery.apply)(ItineraryQuery.unapply))
 
   def callAndParse(query: ItineraryQuery): Future[Result] = {
@@ -121,11 +121,11 @@ class Application extends Controller {
       name1 = "Danube",
       type2 = "station",
       name2 = "Pernety",
-      reseau = "all",
-      traveltype = "plus_rapide",
-      datestart = true,
-      datehour = 12,
-      dateminute = 10
+      reseau = Some("all"),
+      traveltype = Some("plus_rapide"),
+      datestart = Some(true),
+      datehour = Some(12),
+      dateminute = Some(10)
     ))
   }
 
