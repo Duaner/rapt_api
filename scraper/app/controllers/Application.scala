@@ -7,6 +7,8 @@ import org.jsoup.parser.Parser
 import play.api.Play.current
 import play.api._
 import play.api.libs.json
+import play.api.data.Form
+import play.api.data.Forms.{ mapping, nonEmptyText, boolean, number }
 import play.api.libs.json.Json
 import play.api.libs.ws
 import play.api.mvc._
@@ -48,6 +50,18 @@ class Application extends Controller {
   object ItineraryQuery {
     val url = "http://wap.ratp.fr/siv/itinerary-list"
   }
+
+  val formItinerateQuery = Form(mapping(
+    "type1" -> nonEmptyText,
+    "name1" -> nonEmptyText,
+    "type2" -> nonEmptyText,
+    "name2" -> nonEmptyText,
+    "reseau" -> nonEmptyText,
+    "traveltype" -> nonEmptyText,
+    "datestart" -> boolean,
+    "datehour" -> number(min=0, max=23),
+    "dateminute" -> number(min=0, max=59)
+  )(ItineraryQuery.apply)(ItineraryQuery.unapply))
 
   case class UnexpectedResponse(status: Int, content: String) extends Exception
 
@@ -210,8 +224,27 @@ class Application extends Controller {
     // }
   }
 
-  def index = Action.async {
-    val query = ItineraryQuery(
+  def callAndParse(query: Query): Future[Result] = {
+    call(query).map { body =>
+      parse(body, query.url) match {
+        case Some(js) => Ok(js)
+        case None => NotFound(Json.obj("error" -> "Can't find infos"))
+      }
+    }
+  }
+
+  def index = Action.async { implicit req =>
+    import play.api.i18n.Messages.Implicits._
+    formItinerateQuery.bindFromRequest.fold(
+      err => Future.successful {
+        BadRequest(Json.obj("error" -> "bad request", "errors" -> err.errorsAsJson))
+      },
+      callAndParse
+    )
+  }
+
+  def test = Action.async {
+    callAndParse(ItineraryQuery(
       type1 = "station",
       name1 = "Danube",
       type2 = "station",
@@ -221,13 +254,7 @@ class Application extends Controller {
       datestart = true,
       datehour = 12,
       dateminute = 10
-    )
-    call(query).map { body =>
-      parse(body, query.url) match {
-        case Some(js) => Ok(js)
-        case None => NotFound(Json.obj("error" -> "Can't find infos"))
-      }
-    }
+    ))
   }
 
 }
