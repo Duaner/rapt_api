@@ -171,27 +171,42 @@ class Application extends Controller {
   }
 
   case class ParsingState(
-    start: Option[LocalTime] = None,
-    finish: Option[LocalTime] = None,
-    isFinished: Boolean = false
+    startedAt: Option[LocalTime] = None,
+    finishedAt: Option[LocalTime] = None,
+    inFirstWalk: Boolean = false,
+    firstWalkDuration: Option[LocalTime] = None
   ) {
-    def started(date: LocalTime) = copy(start = Some(date))
-    def finished(date: LocalTime) = copy(finish = Some(date), isFinished = true)
+    def isFinished: Boolean = finishedAt.isDefined
+    def started(date: LocalTime) = copy(startedAt = Some(date))
+    def finished(date: LocalTime) = copy(finishedAt = Some(date))
+    def addWalk(station: String) = {
+      if (firstWalkDuration.isEmpty) copy(inFirstWalk = true)
+      else this
+    }
+    def addDuration1(duration: LocalTime) = {
+      if (inFirstWalk) copy(firstWalkDuration = Some(duration), inFirstWalk = false)
+      else this
+    }
+    def addDirection(direction: String) = this
+    def addFrom(station: String, date: LocalTime) = this
+    def addTo(station: String, date: LocalTime) = this
+    def addDuration3(duration: LocalTime) = this
+    def addCorrespondance(correspondance: String) = this
 
     def format: Option[json.JsValue] = {
       for {
-        _start <- this.start
-        _finish <- this.finish
+        _startedAt <- this.startedAt
+        _finishedAt <- this.finishedAt
       } yield {
-        val totalDuration = _finish - _start
+        val totalDuration = _finishedAt - _startedAt
         Json.obj(
           "itineraire" -> Json.obj(
             "nb_correspondances" -> "",
             "duree_total" -> totalDuration,
-            "duree_marche_avant_premiere_station" -> "",
+            "duree_marche_avant_premiere_station" -> firstWalkDuration,
             "correspondances" -> Json.arr(
               Json.obj(
-                "heure_depart" -> start,
+                "heure_depart" -> startedAt,
                 "station_depart" -> "",
                 "station_arrivée" -> "",
                 "ligne" -> ""
@@ -212,13 +227,13 @@ class Application extends Controller {
       case (s, _) if s.isFinished => s
       case (s, selectorStart(date)) => println(s"start = $date"); s.started(date)
       case (s, selectorFinish(date)) => println(s"finish = $date"); s.finished(date)
-      case (s, selectorWalk(station)) => println(s"walk = $station"); s
-      case (s, selectorDuration1(duration)) => println(s"duration1 = $duration"); s
-      case (s, selectorDirection(direction)) => println(s"direction = $direction"); s
-      case (s, selectorFrom((station, date))) => println(s"def = $station at $date"); s
-      case (s, selectorTo((station, date))) => println(s"à = $station at $date"); s
-      case (s, selectorDuration3(duration)) => println(s"duration3 = $duration"); s
-      case (s, selectorCorrespondance(correspondance)) => println(s"correspondance = $correspondance"); s
+      case (s, selectorWalk(station)) => println(s"walk = $station"); s.addWalk(station)
+      case (s, selectorDuration1(duration)) => println(s"duration1 = $duration"); s.addDuration1(duration)
+      case (s, selectorDirection(direction)) => println(s"direction = $direction"); s.addDirection(direction)
+      case (s, selectorFrom((station, date))) => println(s"def = $station at $date"); s.addFrom(station, date)
+      case (s, selectorTo((station, date))) => println(s"à = $station at $date"); s.addTo(station, date)
+      case (s, selectorDuration3(duration)) => println(s"duration3 = $duration"); s.addDuration3(duration)
+      case (s, selectorCorrespondance(correspondance)) => println(s"correspondance = $correspondance"); s.addCorrespondance(correspondance)
       case (s, e) => println(s"unknwon = $e"); s
     }
   }
