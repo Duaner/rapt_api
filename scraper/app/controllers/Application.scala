@@ -1,13 +1,14 @@
 package controllers
 
-import org.jsoup.parser.Parser
+import java.time.LocalTime
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
+import org.jsoup.parser.Parser
 import play.api.Play.current
 import play.api._
-import play.api.libs.ws
 import play.api.libs.json
 import play.api.libs.json.Json
+import play.api.libs.ws
 import play.api.mvc._
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future
@@ -64,42 +65,49 @@ class Application extends Controller {
      }
   }
 
-  trait Response {
-    def toJson: json.JsValue
+  implicit val jsonLocalTimeWrites = json.Writes[LocalTime] { lt =>
+    Json.obj("hours" -> lt.getHour, "minutes" -> lt.getMinute)
   }
-
-  type Hours = Int
-  type Minutes = Int
-  case class Schedule(hours: Hours, minutes: Minutes)
-  object Schedule {
-    implicit val jsonWrites = json.Writes[Schedule] { schedule =>
-      Json.obj("hours" -> schedule.hours, "minutes" -> schedule.minutes)
+  implicit class PimpedLocalTime(val lt: LocalTime) {
+    def -(other: LocalTime): LocalTime = {
+      lt.minusHours(other.getHour).minusMinutes(other.getMinute)
     }
   }
 
   val rxSchedule = """\((\d{1,2}):(\d{1,2})\)""".r
-  def findDate(doc: Document, where: Regex): Option[Schedule] = {
+  def findDate(doc: Document, where: Regex): Option[LocalTime] = {
     import scala.collection.JavaConversions._
     doc.select(".bg2").toSeq.find { el =>
       Option(el.children.first).map(_.text).flatMap(where.findFirstIn).isDefined
     }.flatMap { el =>
       el.children().toSeq.lift(1).map(_.text).flatMap {
-        case rxSchedule(hours, minutes) => Some(Schedule(hours.toInt, minutes.toInt))
+        case rxSchedule(hours, minutes) => Some(LocalTime.of(hours.toInt, minutes.toInt))
         case _ => None
       }
     }
   }
 
-  def parse(body: HTMLBody, url: String): Response = {
-
+  def parse(body: HTMLBody, url: String): Option[json.JsValue] = {
     val doc: Document = Parser.parse(body, url)
-    val start = findDate(doc, """Départ\s*:""".r)
-    val finish = findDate(doc, """Arrivée\s*:""".r)
-
-    new Response {
-      def toJson = Json.obj(
-        "start" -> start,
-        "finish" -> finish
+    for {
+      start <- findDate(doc, """Départ\s*:""".r)
+      finish <- findDate(doc, """Arrivée\s*:""".r)
+    } yield {
+      val totalDuration = finish - start
+      Json.obj(
+        "itineraire" -> Json.obj(
+          "nb_correspondances" -> "",
+          "duree_total" -> totalDuration,
+          "duree_marche_avant_premiere_station" -> "",
+          "correspondances" -> Json.arr(
+            Json.obj(
+              "heure_depart" -> start,
+              "station_depart" -> "",
+              "station_arrivée" -> "",
+              "ligne" -> ""
+            )
+          )
+        )
       )
     }
   }
@@ -117,8 +125,10 @@ class Application extends Controller {
       dateminute = 20
     )
     call(query).map { body =>
-      val resp = parse(body, query.url)
-      Ok(resp.toJson)
+      parse(body, query.url) match {
+        case Some(js) => Ok(js)
+        case None => NotFound(Json.obj("error" -> "Can't find infos"))
+      }
     }
   }
 
