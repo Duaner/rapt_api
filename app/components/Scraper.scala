@@ -242,8 +242,6 @@ object Scraper {
     }
   }
 
-  case class UnexpectedResponse(status: Int, content: String) extends Exception
-
   type HTMLBody = String
 
   def call(query: Query)(implicit app: Application): Future[HTMLBody] = {
@@ -254,7 +252,7 @@ object Scraper {
      .get()
      .flatMap {
        case resp if resp.status == 200 => Future.successful(resp.body: HTMLBody)
-       case resp => Future.failed(UnexpectedResponse(resp.status, resp.body))
+       case resp => Future.failed(UnexpectedResponse(resp))
      }
   }
 

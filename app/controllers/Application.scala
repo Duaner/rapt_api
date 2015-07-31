@@ -5,14 +5,22 @@ import play.api.Play.current
 import play.api._
 import play.api.data.Form
 import play.api.data.Forms.{ mapping, nonEmptyText, boolean, number }
+import play.api.libs.json
 import play.api.libs.json.Json
 import play.api.mvc._
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future
 
-import components.Scraper
+import components.{ Geodecoder, Scraper }
 
 class Application extends Controller {
+
+  def findLatlng(latlng: String): Future[Either[json.JsValue, String]] = {
+    Geodecoder.searchAddress(latlng).map {
+      case Some(address) => Right(address)
+      case None => Left(Json.obj("error" -> s"No address found at coordinates $latlng"))
+    }
+  }
 
   case class ItineraryQuery(
     type1: String,
@@ -26,6 +34,24 @@ class Application extends Controller {
     dateminute: Int
   ) extends Scraper.Query {
     def url = ItineraryQuery.url
+    def resolve: Future[Either[json.JsValue, ItineraryQuery]] = {
+      for {
+        typeName1 <- {
+          if (type1 == "latlng") findLatlng(name1).map(_.right.map("adress" -> _))
+          else Future.successful(Right(type1 -> name1))
+        }
+        typeName2 <- {
+          if (type2 == "latlng") findLatlng(name2).map(_.right.map("adress" -> _))
+          else Future.successful(Right(type2 -> name2))
+        }
+      } yield {
+        typeName1.right.flatMap { case (type1, name1) =>
+          typeName2.right.map { case (type2, name2) =>
+            copy(type1 = type1, name1 = name1, type2 = type2, name2 = name2)
+          }
+        }
+      }
+    }
     def toQueryString = Seq[(String, String)](
       "type1" -> type1,
       "name1" -> name1,
@@ -74,6 +100,13 @@ class Application extends Controller {
       },
       callAndParse
     )
+  }
+
+  def search(latlng: String) = Action.async {
+    findLatlng(latlng).map {
+      case Right(address) => Ok(Json.obj("address" -> address))
+      case Left(err) => NotFound(err)
+    }
   }
 
   def test = Action.async {

@@ -5,3 +5,5 @@
 # Home page
 GET     /itinerary                  controllers.Application.index
 GET     /test/itinerary             controllers.Application.test
+
+GET     /search                     controllers.Application.search(latlng)
