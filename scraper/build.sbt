@@ -1,4 +1,4 @@
-name := """play-scala"""
+name := """ratp-scraper"""
 
 version := "1.0-SNAPSHOT"
 
