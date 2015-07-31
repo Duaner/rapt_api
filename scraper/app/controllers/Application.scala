@@ -170,58 +170,62 @@ class Application extends Controller {
       .flatMap { _.textNodes.toSeq.lift(0).map(_.text) }
   }
 
-  case class ParsingState(isFinished: Boolean) {
-    def finished = copy(isFinished = true)
-  }
-  object ParsingState {
-    def empty = ParsingState(isFinished = false)
-    object unfinished {
-      def unapply(s: ParsingState) = if (s.isFinished) None else Some(s)
+  case class ParsingState(
+    start: Option[LocalTime] = None,
+    finish: Option[LocalTime] = None,
+    isFinished: Boolean = false
+  ) {
+    def started(date: LocalTime) = copy(start = Some(date))
+    def finished(date: LocalTime) = copy(finish = Some(date), isFinished = true)
+
+    def format: Option[json.JsValue] = {
+      for {
+        _start <- this.start
+        _finish <- this.finish
+      } yield {
+        val totalDuration = _finish - _start
+        Json.obj(
+          "itineraire" -> Json.obj(
+            "nb_correspondances" -> "",
+            "duree_total" -> totalDuration,
+            "duree_marche_avant_premiere_station" -> "",
+            "correspondances" -> Json.arr(
+              Json.obj(
+                "heure_depart" -> start,
+                "station_depart" -> "",
+                "station_arrivée" -> "",
+                "ligne" -> ""
+              )
+            )
+          )
+        )
+      }
     }
   }
+  object ParsingState {
+    def empty: ParsingState = ParsingState()
+  }
 
-  def parseDocument(doc: Document) = {
+  def parseDocument(doc: Document): ParsingState = {
     import scala.collection.JavaConversions._
-    doc.select(".bg1,.bg2,.bg3").toSeq.fold(ParsingState.empty) {
-      case (ParsingState.unfinished(s), selectorStart(date)) => println(s"start = $date"); s
-      case (ParsingState.unfinished(s), selectorFinish(date)) => println(s"finish = $date"); s.finished
-      case (ParsingState.unfinished(s), selectorWalk(station)) => println(s"walk = $station"); s
-      case (ParsingState.unfinished(s), selectorDuration1(duration)) => println(s"duration1 = $duration"); s
-      case (ParsingState.unfinished(s), selectorDirection(direction)) => println(s"direction = $direction"); s
-      case (ParsingState.unfinished(s), selectorFrom((station, date))) => println(s"def = $station at $date"); s
-      case (ParsingState.unfinished(s), selectorTo((station, date))) => println(s"à = $station at $date"); s
-      case (ParsingState.unfinished(s), selectorDuration3(duration)) => println(s"duration3 = $duration"); s
-      case (ParsingState.unfinished(s), selectorCorrespondance(correspondance)) => println(s"correspondance = $correspondance"); s
-      case (ParsingState.unfinished(s), e) => println(s"unknwon = $e"); s
-      case (s, _) => s
+    doc.select(".bg1,.bg2,.bg3").toSeq.foldLeft(ParsingState.empty) {
+      case (s, _) if s.isFinished => s
+      case (s, selectorStart(date)) => println(s"start = $date"); s.started(date)
+      case (s, selectorFinish(date)) => println(s"finish = $date"); s.finished(date)
+      case (s, selectorWalk(station)) => println(s"walk = $station"); s
+      case (s, selectorDuration1(duration)) => println(s"duration1 = $duration"); s
+      case (s, selectorDirection(direction)) => println(s"direction = $direction"); s
+      case (s, selectorFrom((station, date))) => println(s"def = $station at $date"); s
+      case (s, selectorTo((station, date))) => println(s"à = $station at $date"); s
+      case (s, selectorDuration3(duration)) => println(s"duration3 = $duration"); s
+      case (s, selectorCorrespondance(correspondance)) => println(s"correspondance = $correspondance"); s
+      case (s, e) => println(s"unknwon = $e"); s
     }
   }
 
   def parse(body: HTMLBody, url: String): Option[json.JsValue] = {
     val doc: Document = Parser.parse(body, url)
-    parseDocument(doc)
-    Some(Json.obj())
-    // for {
-    //   start <- findDate(doc, """Départ\s*:""".r)
-    //   finish <- findDate(doc, """Arrivée\s*:""".r)
-    // } yield {
-    //   val totalDuration = finish - start
-    //   Json.obj(
-    //     "itineraire" -> Json.obj(
-    //       "nb_correspondances" -> "",
-    //       "duree_total" -> totalDuration,
-    //       "duree_marche_avant_premiere_station" -> "",
-    //       "correspondances" -> Json.arr(
-    //         Json.obj(
-    //           "heure_depart" -> start,
-    //           "station_depart" -> "",
-    //           "station_arrivée" -> "",
-    //           "ligne" -> ""
-    //         )
-    //       )
-    //     )
-    //   )
-    // }
+    parseDocument(doc).format
   }
 
   def callAndParse(query: Query): Future[Result] = {
