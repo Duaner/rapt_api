@@ -1,7 +1,0 @@
-# Routes
-# This file defines all application routes (Higher priority routes first)
-# ~~~~
-
-# Home page
-GET     /itinerary                  controllers.Application.index
-GET     /test/itinerary             controllers.Application.test

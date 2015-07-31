@@ -1,0 +1,3 @@
+[submodule "play-scraper"]
+	path = play-scraper
+	url = https://github.com/Duaner/rapt_api.git
