@@ -219,7 +219,6 @@ class Application extends Controller {
           this
       }
     }
-    def addDuration3(duration: LocalTime) = this
 
     def format: Option[json.JsValue] = {
       for {
@@ -260,7 +259,7 @@ class Application extends Controller {
       case (s, selectorDirection(direction)) => println(s"direction = $direction"); s.addDirection(direction)
       case (s, selectorFrom((station, date))) => println(s"de = $station at $date"); s.addFrom(station, date)
       case (s, selectorTo((station, date))) => println(s"à = $station at $date"); s.addTo(station, date)
-      case (s, selectorDuration3(duration)) => println(s"duration3 = $duration"); s.addDuration3(duration)
+      case (s, selectorDuration3(duration)) => println(s"duration3 = $duration"); s  // osef
       case (s, selectorCorrespondance(correspondance)) => println(s"correspondance = $correspondance"); s  // osef
       case (s, e) => println(s"unknwon = $e"); s
     }
