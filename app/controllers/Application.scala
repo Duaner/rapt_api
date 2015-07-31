@@ -4,7 +4,7 @@ import java.time.LocalTime
 import play.api.Play.current
 import play.api._
 import play.api.data.Form
-import play.api.data.Forms.{ mapping, nonEmptyText, boolean, number, optional }
+import play.api.data.Forms.{ boolean, mapping, nonEmptyText, number, optional, text }
 import play.api.libs.json
 import play.api.libs.json.Json
 import play.api.mvc._
@@ -22,20 +22,46 @@ class Application extends Controller {
     }
   }
 
+  trait ResolvableToQuery {
+    def resolve: Future[Either[json.JsValue, Scraper.Query]]
+  }
+
   case class SimpleQuery(
     latlng: String,
-    station: String
-  ) {
-    def toItineraryQuery = ItineraryQuery(
-      type1 = "latlng",
-      name1 = latlng,
-      type2 = "station",
-      name2 = station
-    )
+    station: String,
+    reseau: Option[String] = None,
+    traveltype: Option[String] = None,
+    datestart: Option[Boolean] = None,
+    datehour: Option[Int] = None,
+    dateminute: Option[Int] = None
+  ) extends ResolvableToQuery {
+    def resolve: Future[Either[json.JsValue, Scraper.Query]] = {
+      findLatlng(latlng).map(_.right.map { address =>
+        new Scraper.Query {
+          def url = ItineraryQuery.url
+          def toQueryString = Seq[(String, Option[String])](
+            "type1" -> Some("adresse"),
+            "name1" -> Some(address),
+            "type2" -> Some("station"),
+            "name2" -> Some(station),
+            "reseau" -> reseau,
+            "traveltype" -> traveltype,
+            "datestart" -> datestart.map(_.toString),
+            "datehour" -> datehour.map(_.toString),
+            "dateminute" -> dateminute.map(_.toString)
+          ).collect { case (k, Some(v)) => (k, v) }
+        }
+      })
+    }
   }
   val formSimpleQuery = Form(mapping(
     "latlng" -> nonEmptyText,
-    "station" -> nonEmptyText
+    "station" -> nonEmptyText,
+    "reseau" -> optional(text),
+    "traveltype" -> optional(text),
+    "datestart" -> optional(boolean),
+    "datehour" -> optional(number(min=0, max=23)),
+    "dateminute" -> optional(number(min=0, max=59))
   )(SimpleQuery.apply)(SimpleQuery.unapply))
 
   case class ItineraryQuery(
@@ -48,9 +74,8 @@ class Application extends Controller {
     datestart: Option[Boolean] = None,
     datehour: Option[Int] = None,
     dateminute: Option[Int] = None
-  ) extends Scraper.Query {
-    def url = ItineraryQuery.url
-    def resolve: Future[Either[json.JsValue, ItineraryQuery]] = {
+  ) extends ResolvableToQuery {
+    def resolve: Future[Either[json.JsValue, Scraper.Query]] = {
       for {
         typeName1 <- {
           if (type1 == "latlng") findLatlng(name1).map(_.right.map("adresse" -> _))
@@ -63,22 +88,24 @@ class Application extends Controller {
       } yield {
         typeName1.right.flatMap { case (type1, name1) =>
           typeName2.right.map { case (type2, name2) =>
-            copy(type1 = type1, name1 = name1, type2 = type2, name2 = name2)
+            new Scraper.Query {
+              def url = ItineraryQuery.url
+              def toQueryString = Seq[(String, Option[String])](
+                "type1" -> Some(type1),
+                "name1" -> Some(name1),
+                "type2" -> Some(type2),
+                "name2" -> Some(name2),
+                "reseau" -> reseau,
+                "traveltype" -> traveltype,
+                "datestart" -> datestart.map(_.toString),
+                "datehour" -> datehour.map(_.toString),
+                "dateminute" -> dateminute.map(_.toString)
+              ).collect { case (k, Some(v)) => (k, v) }
+            }
           }
         }
       }
     }
-    def toQueryString = Seq[(String, Option[String])](
-      "type1" -> Some(type1),
-      "name1" -> Some(name1),
-      "type2" -> Some(type2),
-      "name2" -> Some(name2),
-      "reseau" -> reseau,
-      "traveltype" -> traveltype,
-      "datestart" -> datestart.map(_.toString),
-      "datehour" -> datehour.map(_.toString),
-      "dateminute" -> dateminute.map(_.toString)
-    ).collect { case (k, Some(v)) => (k, v) }
   }
   object ItineraryQuery {
     val url = "http://wap.ratp.fr/siv/itinerary-list"
@@ -89,14 +116,14 @@ class Application extends Controller {
     "name1" -> nonEmptyText,
     "type2" -> nonEmptyText,
     "name2" -> nonEmptyText,
-    "reseau" -> optional(nonEmptyText),
-    "traveltype" -> optional(nonEmptyText),
+    "reseau" -> optional(text),
+    "traveltype" -> optional(text),
     "datestart" -> optional(boolean),
     "datehour" -> optional(number(min=0, max=23)),
     "dateminute" -> optional(number(min=0, max=59))
   )(ItineraryQuery.apply)(ItineraryQuery.unapply))
 
-  def callAndParse(query: ItineraryQuery): Future[Result] = {
+  def callAndParse(query: ResolvableToQuery): Future[Result] = {
     query.resolve.flatMap {
       case Right(query) =>
         Scraper.call(query).map { body =>
@@ -125,7 +152,7 @@ class Application extends Controller {
           callAndParse
         )
       },
-      q => callAndParse(q.toItineraryQuery)
+      callAndParse
     )
   }
 
