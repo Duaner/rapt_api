@@ -313,7 +313,7 @@ class Application extends Controller {
         case ParsingOk(value) => Ok(value)
         case err => InternalServerError(err.value)
       }).withHeaders(
-        "Content-Type" -> "text/json",
+        "Content-Type" -> "text/json; charset=utf-8",
         "Access-Control-Allow-Origin" -> "*"
       )
     }
