@@ -74,55 +74,153 @@ class Application extends Controller {
     }
   }
 
+  case class Selector[A](f: Element => Option[A]) {
+    def unapply(e: Element): Option[A] = f(e)
+  }
+
   val rxSchedule = """\((\d{1,2}):(\d{1,2})\)""".r
-  def findDate(doc: Document, where: Regex): Option[LocalTime] = {
+  def selectorDate(rx: Regex) = Selector[LocalTime] { el =>
     import scala.collection.JavaConversions._
-    doc.select(".bg2").toSeq.find { el =>
-      Option(el.children.first).map(_.text).flatMap(where.findFirstIn).isDefined
-    }.flatMap { el =>
-      el.children().toSeq.lift(1).map(_.text).flatMap {
-        case rxSchedule(hours, minutes) => Some(LocalTime.of(hours.toInt, minutes.toInt))
-        case _ => None
+    Option(el)
+      .filter { _.classNames.contains("bg2") }
+      .filter { e => Option(e.children.first).map(_.text).flatMap(rx.findFirstIn).isDefined }
+      .flatMap { e =>
+        e.children().toSeq.lift(1).map(_.text).flatMap {
+          case rxSchedule(hours, minutes) => Some(LocalTime.of(hours.toInt, minutes.toInt))
+          case _ => None
+        }
       }
+  }
+
+  val selectorStart = selectorDate("""Départ\s*:""".r)
+  val selectorFinish = selectorDate("""Arrivée\s*:""".r)
+
+  val rxSelectorWalk = """Aller à""".r
+  val selectorWalk = Selector[String] { el =>
+    import scala.collection.JavaConversions._
+    Option(el)
+      .filter { _.classNames.contains("bg1") }
+      .filter { _.children.toSeq.lift(1).map(_.text).flatMap(rxSelectorWalk.findFirstIn).isDefined }
+      .flatMap { _.textNodes.toSeq.lift(0).map(_.text) }
+  }
+
+  val rxSelectorDuration = """(\d+) min""".r
+  def selectorDuration(klass: String) = Selector[LocalTime] { el =>
+    import scala.collection.JavaConversions._
+    Option(el)
+      .filter { _.classNames.contains(klass) }
+      .flatMap { e =>
+        e.children().toSeq.lift(1).map(_.text).flatMap {
+          case rxSelectorDuration(minutes) => Some(LocalTime.of(0, minutes.toInt))
+          case _ => None
+        }
+      }
+  }
+  val selectorDuration1 = selectorDuration("bg1")
+  val selectorDuration3 = selectorDuration("bg3")
+
+  val rxSelectorDirection = """dir""".r
+  val selectorDirection = Selector[String] { el =>
+    import scala.collection.JavaConversions._
+    Option(el)
+      .filter { _.classNames.contains("bg3") }
+      .filter { _.children.toSeq.lift(1).map(_.text).flatMap(rxSelectorDirection.findFirstIn).isDefined }
+      .flatMap { _.textNodes.toSeq.lift(0).map(_.text) }
+  }
+
+  def selectorFromTo(rx: Regex) = Selector[(String, LocalTime)] { el =>
+    import scala.collection.JavaConversions._
+    Option(el)
+      .filter { _.classNames.contains("bg3") }
+      .filter { _.children.toSeq.lift(1).map(_.text).flatMap(rx.findFirstIn).isDefined }
+      .flatMap { e =>
+        for {
+          station <- e.textNodes.toSeq.lift(0).map(_.text)
+          date <- e.children().toSeq.lift(2).map(_.text).flatMap {
+            case rxSchedule(hours, minutes) => Some(LocalTime.of(hours.toInt, minutes.toInt))
+            case _ => None
+          }
+        } yield (station, date)
+      }
+  }
+
+  val selectorFrom = selectorFromTo("""de""".r)
+  val selectorTo = selectorFromTo("""à""".r)
+
+  val rxSelectorCorrespondance = """Correspondance à""".r
+  val selectorCorrespondance = Selector[String] { el =>
+    import scala.collection.JavaConversions._
+    Option(el)
+      .filter { _.classNames.contains("bg1") }
+      .filter { _.children.toSeq.lift(1).map(_.text).flatMap(rxSelectorCorrespondance.findFirstIn).isDefined }
+      .flatMap { _.textNodes.toSeq.lift(0).map(_.text) }
+  }
+
+  case class ParsingState(isFinished: Boolean) {
+    def finished = copy(isFinished = true)
+  }
+  object ParsingState {
+    def empty = ParsingState(isFinished = false)
+    object unfinished {
+      def unapply(s: ParsingState) = if (s.isFinished) None else Some(s)
+    }
+  }
+
+  def parseDocument(doc: Document) = {
+    import scala.collection.JavaConversions._
+    doc.select(".bg1,.bg2,.bg3").toSeq.fold(ParsingState.empty) {
+      case (ParsingState.unfinished(s), selectorStart(date)) => println(s"start = $date"); s
+      case (ParsingState.unfinished(s), selectorFinish(date)) => println(s"finish = $date"); s.finished
+      case (ParsingState.unfinished(s), selectorWalk(station)) => println(s"walk = $station"); s
+      case (ParsingState.unfinished(s), selectorDuration1(duration)) => println(s"duration1 = $duration"); s
+      case (ParsingState.unfinished(s), selectorDirection(direction)) => println(s"direction = $direction"); s
+      case (ParsingState.unfinished(s), selectorFrom((station, date))) => println(s"def = $station at $date"); s
+      case (ParsingState.unfinished(s), selectorTo((station, date))) => println(s"à = $station at $date"); s
+      case (ParsingState.unfinished(s), selectorDuration3(duration)) => println(s"duration3 = $duration"); s
+      case (ParsingState.unfinished(s), selectorCorrespondance(correspondance)) => println(s"correspondance = $correspondance"); s
+      case (ParsingState.unfinished(s), e) => println(s"unknwon = $e"); s
+      case (s, _) => s
     }
   }
 
   def parse(body: HTMLBody, url: String): Option[json.JsValue] = {
     val doc: Document = Parser.parse(body, url)
-    for {
-      start <- findDate(doc, """Départ\s*:""".r)
-      finish <- findDate(doc, """Arrivée\s*:""".r)
-    } yield {
-      val totalDuration = finish - start
-      Json.obj(
-        "itineraire" -> Json.obj(
-          "nb_correspondances" -> "",
-          "duree_total" -> totalDuration,
-          "duree_marche_avant_premiere_station" -> "",
-          "correspondances" -> Json.arr(
-            Json.obj(
-              "heure_depart" -> start,
-              "station_depart" -> "",
-              "station_arrivée" -> "",
-              "ligne" -> ""
-            )
-          )
-        )
-      )
-    }
+    parseDocument(doc)
+    Some(Json.obj())
+    // for {
+    //   start <- findDate(doc, """Départ\s*:""".r)
+    //   finish <- findDate(doc, """Arrivée\s*:""".r)
+    // } yield {
+    //   val totalDuration = finish - start
+    //   Json.obj(
+    //     "itineraire" -> Json.obj(
+    //       "nb_correspondances" -> "",
+    //       "duree_total" -> totalDuration,
+    //       "duree_marche_avant_premiere_station" -> "",
+    //       "correspondances" -> Json.arr(
+    //         Json.obj(
+    //           "heure_depart" -> start,
+    //           "station_depart" -> "",
+    //           "station_arrivée" -> "",
+    //           "ligne" -> ""
+    //         )
+    //       )
+    //     )
+    //   )
+    // }
   }
 
   def index = Action.async {
     val query = ItineraryQuery(
       type1 = "station",
-      name1 = "olympiades",
+      name1 = "Danube",
       type2 = "station",
-      name2 = "saint-lazare",
+      name2 = "Pernety",
       reseau = "all",
       traveltype = "plus_rapide",
       datestart = true,
-      datehour = 10,
-      dateminute = 20
+      datehour = 12,
+      dateminute = 10
     )
     call(query).map { body =>
       parse(body, query.url) match {
