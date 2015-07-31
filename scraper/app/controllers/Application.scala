@@ -170,11 +170,26 @@ class Application extends Controller {
       .flatMap { _.textNodes.toSeq.lift(0).map(_.text) }
   }
 
+  case class ParsingCorrespondance(
+    from: Option[String] = None,
+    startAt: Option[LocalTime] = None,
+    to: Option[String] = None,
+    finishAt: Option[LocalTime] = None,
+    line: Option[String] = None
+  ) {
+    def addFrom(station: String, date: LocalTime) = copy(from = Some(station), startAt = Some(date))
+    def addTo(station: String, date: LocalTime) = copy(to = Some(station), finishAt = Some(date))
+  }
+  object ParsingCorrespondance {
+    def empty = ParsingCorrespondance()
+  }
+
   case class ParsingState(
     startedAt: Option[LocalTime] = None,
     finishedAt: Option[LocalTime] = None,
     inFirstWalk: Boolean = false,
-    firstWalkDuration: Option[LocalTime] = None
+    firstWalkDuration: Option[LocalTime] = None,
+    correspondances: List[ParsingCorrespondance] = Nil  // in reverse order
   ) {
     def isFinished: Boolean = finishedAt.isDefined
     def started(date: LocalTime) = copy(startedAt = Some(date))
@@ -187,11 +202,24 @@ class Application extends Controller {
       if (inFirstWalk) copy(firstWalkDuration = Some(duration), inFirstWalk = false)
       else this
     }
-    def addDirection(direction: String) = this
-    def addFrom(station: String, date: LocalTime) = this
-    def addTo(station: String, date: LocalTime) = this
+    def addDirection(direction: String) = copy(correspondances = ParsingCorrespondance.empty :: correspondances)
+    def addFrom(station: String, date: LocalTime) = {
+      correspondances match {
+        case c :: cs => copy(correspondances = c.addFrom(station, date) :: cs)
+        case _ =>
+          Logger.warn(s"Trying to add a From without having added Direction")
+          this
+      }
+    }
+    def addTo(station: String, date: LocalTime) = {
+      correspondances match {
+        case c :: cs => copy(correspondances = c.addTo(station, date) :: cs)
+        case _ =>
+          Logger.warn(s"Trying to add a To without having added Direction")
+          this
+      }
+    }
     def addDuration3(duration: LocalTime) = this
-    def addCorrespondance(correspondance: String) = this
 
     def format: Option[json.JsValue] = {
       for {
@@ -201,17 +229,17 @@ class Application extends Controller {
         val totalDuration = _finishedAt - _startedAt
         Json.obj(
           "itineraire" -> Json.obj(
-            "nb_correspondances" -> "",
+            "nb_correspondances" -> correspondances.size,
             "duree_total" -> totalDuration,
             "duree_marche_avant_premiere_station" -> firstWalkDuration,
-            "correspondances" -> Json.arr(
+            "correspondances" -> json.JsArray(correspondances.reverse.map { c =>
               Json.obj(
-                "heure_depart" -> startedAt,
-                "station_depart" -> "",
-                "station_arrivée" -> "",
-                "ligne" -> ""
+                "heure_depart" -> c.startAt,
+                "station_depart" -> c.from,
+                "station_arrivée" -> c.to,
+                "ligne" -> c.line
               )
-            )
+            })
           )
         )
       }
@@ -230,10 +258,10 @@ class Application extends Controller {
       case (s, selectorWalk(station)) => println(s"walk = $station"); s.addWalk(station)
       case (s, selectorDuration1(duration)) => println(s"duration1 = $duration"); s.addDuration1(duration)
       case (s, selectorDirection(direction)) => println(s"direction = $direction"); s.addDirection(direction)
-      case (s, selectorFrom((station, date))) => println(s"def = $station at $date"); s.addFrom(station, date)
+      case (s, selectorFrom((station, date))) => println(s"de = $station at $date"); s.addFrom(station, date)
       case (s, selectorTo((station, date))) => println(s"à = $station at $date"); s.addTo(station, date)
       case (s, selectorDuration3(duration)) => println(s"duration3 = $duration"); s.addDuration3(duration)
-      case (s, selectorCorrespondance(correspondance)) => println(s"correspondance = $correspondance"); s.addCorrespondance(correspondance)
+      case (s, selectorCorrespondance(correspondance)) => println(s"correspondance = $correspondance"); s  // osef
       case (s, e) => println(s"unknwon = $e"); s
     }
   }
