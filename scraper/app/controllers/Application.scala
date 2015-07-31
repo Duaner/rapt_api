@@ -69,7 +69,7 @@ class Application extends Controller {
 
   def call(query: Query): Future[HTMLBody] = {
     ws.WS
-     .url("http://wap.ratp.fr/siv/itinerary-list")
+     .url(query.url)
      .withQueryString(query.toQueryString: _*)
      .withHeaders("User-Agent" -> "super-user")
      .get()
