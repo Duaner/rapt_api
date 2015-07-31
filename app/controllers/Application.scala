@@ -22,16 +22,32 @@ class Application extends Controller {
     }
   }
 
+  case class SimpleQuery(
+    latlng: String,
+    station: String
+  ) {
+    def toItineraryQuery = ItineraryQuery(
+      type1 = "latlng",
+      name1 = latlng,
+      type2 = "station",
+      name2 = station
+    )
+  }
+  val formSimpleQuery = Form(mapping(
+    "latlng" -> nonEmptyText,
+    "station" -> nonEmptyText
+  )(SimpleQuery.apply)(SimpleQuery.unapply))
+
   case class ItineraryQuery(
     type1: String,
     name1: String,
     type2: String,
     name2: String,
-    reseau: Option[String],
-    traveltype: Option[String],
-    datestart: Option[Boolean],
-    datehour: Option[Int],
-    dateminute: Option[Int]
+    reseau: Option[String] = None,
+    traveltype: Option[String] = None,
+    datestart: Option[Boolean] = None,
+    datehour: Option[Int] = None,
+    dateminute: Option[Int] = None
   ) extends Scraper.Query {
     def url = ItineraryQuery.url
     def resolve: Future[Either[json.JsValue, ItineraryQuery]] = {
@@ -100,11 +116,16 @@ class Application extends Controller {
 
   def index = Action.async { implicit req =>
     import play.api.i18n.Messages.Implicits._
-    formItinerateQuery.bindFromRequest.fold(
-      err => Future.successful {
-        BadRequest(Json.obj("error" -> "bad request", "errors" -> err.errorsAsJson))
+    formSimpleQuery.bindFromRequest.fold(
+      err => {
+        formItinerateQuery.bindFromRequest.fold(
+          _ => Future.successful {
+            BadRequest(Json.obj("error" -> "bad request", "errors" -> err.errorsAsJson))
+          },
+          callAndParse
+        )
       },
-      callAndParse
+      q => callAndParse(q.toItineraryQuery)
     )
   }
 
