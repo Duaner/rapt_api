@@ -37,11 +37,11 @@ class Application extends Controller {
     def resolve: Future[Either[json.JsValue, ItineraryQuery]] = {
       for {
         typeName1 <- {
-          if (type1 == "latlng") findLatlng(name1).map(_.right.map("adress" -> _))
+          if (type1 == "latlng") findLatlng(name1).map(_.right.map("adresse" -> _))
           else Future.successful(Right(type1 -> name1))
         }
         typeName2 <- {
-          if (type2 == "latlng") findLatlng(name2).map(_.right.map("adress" -> _))
+          if (type2 == "latlng") findLatlng(name2).map(_.right.map("adresse" -> _))
           else Future.successful(Right(type2 -> name2))
         }
       } yield {
@@ -80,12 +80,18 @@ class Application extends Controller {
     "dateminute" -> number(min=0, max=59)
   )(ItineraryQuery.apply)(ItineraryQuery.unapply))
 
-  def callAndParse(query: Scraper.Query): Future[Result] = {
-    Scraper.call(query).map { body =>
-      (Scraper.parse(body, query.url) match {
-        case Scraper.ParsingOk(value) => Ok(value)
-        case err => InternalServerError(err.value)
-      }).withHeaders(
+  def callAndParse(query: ItineraryQuery): Future[Result] = {
+    query.resolve.flatMap {
+      case Right(query) =>
+        Scraper.call(query).map { body =>
+          (Scraper.parse(body, query.url) match {
+            case Scraper.ParsingOk(value) => Ok(value)
+            case err => InternalServerError(err.value)
+          })
+        }
+      case Left(err) => Future.successful(BadRequest(err))
+    }.map { res =>
+      res.withHeaders(
         "Content-Type" -> "text/json; charset=utf-8",
         "Access-Control-Allow-Origin" -> "*"
       )

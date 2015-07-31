@@ -245,6 +245,9 @@ object Scraper {
   type HTMLBody = String
 
   def call(query: Query)(implicit app: Application): Future[HTMLBody] = {
+    Logger.debug(s"""CALL ${query.url}?${query.toQueryString.map{
+      case (k,v) => s"$k=${java.net.URLEncoder.encode(v, "UTF-8")}"
+    }.mkString("&")}""")
     ws.WS
      .url(query.url)
      .withQueryString(query.toQueryString: _*)
